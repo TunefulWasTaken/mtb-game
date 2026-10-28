@@ -20,16 +20,16 @@ Then open <http://localhost:5173> in your browser.
 | --- | --- |
 | W | Pedal |
 | S | Brake (both brakes, squeezes on progressively) |
-| A / D | Steer and lean |
-| ↑ / ↓ | Shift your weight forward / back (manuals, drops, landings) |
+| A / D | Steer and lean. In the air: whip the bike sideways |
+| ↑ / ↓ | Shift your weight forward / back. In the air: rotate (flips on big jumps) |
 | Space | Hold to crouch, release to hop |
 | C | Switch between 3rd-person and 1st-person camera |
 | R | Respawn at the last checkpoint |
 | T | Back to the top |
 | H | Hide the controls panel |
 
-Tips: lean back (↓) as you go off drops and jumps, don't grab the front brake with a wheel in the air,
-and roots are slippery.
+Tips: let go of the keys before you land and the rider lines the bike up with the ground.
+Don't grab the front brake with a wheel in the air, and roots are slippery.
 
 ## What's in it
 

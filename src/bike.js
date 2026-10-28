@@ -132,6 +132,11 @@ export class Bike {
     this.steerInput = 0;
     this.brakeLevel = 0;
     this.lean = 0;
+    this.slip = 0;
+    this.airPitch = 0;
+    this.maxWhip = 0;
+    this.absorb = 0;
+    this.trick = '';
     this.crank = Math.PI / 2;
     this.pedalling = 0;
     this.crouch = 0;
@@ -169,6 +174,28 @@ export class Bike {
     this.fwd.set(0, 0, -1).applyQuaternion(this._q);
     this.up.set(0, 1, 0).applyQuaternion(this._q);
     this.right.set(1, 0, 0).applyQuaternion(this._q);
+  }
+
+  // Every push goes through these: a NaN reaching Rapier breaks the whole physics world.
+  impulse(v) {
+    if (Number.isFinite(v.x + v.y + v.z)) this.body.applyImpulse(v, true);
+  }
+
+  impulseAt(v, p) {
+    if (Number.isFinite(v.x + v.y + v.z + p.x + p.y + p.z)) this.body.applyImpulseAtPoint(v, p, true);
+  }
+
+  torque(v) {
+    if (Number.isFinite(v.x + v.y + v.z)) this.body.applyTorqueImpulse(v, true);
+  }
+
+  // True if the body's position, rotation and velocities are all real numbers.
+  healthy() {
+    const t = this.body.translation();
+    const r = this.body.rotation();
+    const l = this.body.linvel();
+    const a = this.body.angvel();
+    return Number.isFinite(t.x + t.y + t.z + r.x + r.y + r.z + r.w + l.x + l.y + l.z + a.x + a.y + a.z);
   }
 
   // 1 / effective mass of the body at offset r in direction d.
@@ -221,6 +248,10 @@ export class Bike {
     this.crashed = false;
     this.crashReason = '';
     this.spawnGrace = 0.25;
+    this.airPitch = 0;
+    this.maxWhip = 0;
+    this.absorb = 0;
+    this.trick = '';
     this.velHistory.length = 0;
     this.airTime = 0;
     this.hopCharge = 0;
@@ -318,6 +349,14 @@ export class Bike {
     this.lean = lean;
     const rollRate = av.dot(fwd);
     const yawRateRight = -av.dot(uRef);
+    // slip: angle from where the bike points to where it's going (positive = travel is to the left)
+    const hSpeed = Math.hypot(lv.x, lv.z);
+    let slip = 0;
+    if (hSpeed > 1.5) {
+      const fl = Math.hypot(fwd.x, fwd.z) || 1;
+      slip = Math.atan2((fwd.z * lv.x - fwd.x * lv.z) / fl, (fwd.x * lv.x + fwd.z * lv.z) / fl);
+    }
+    this.slip = slip;
 
     this.steerInput += clamp(steerIn - this.steerInput, -dt * 8, dt * 8);
     // the rider judges how hard to lean from the grip under the tyres
@@ -347,7 +386,7 @@ export class Bike {
       const wn = 7;
       let tau = Iroll * (wn * wn * (targetLean * 0.3 - lean) - 2 * wn * rollRate);
       tau -= this.mass * this.comHeight * G * Math.sin(lean) * 0.9;
-      b.applyTorqueImpulse(fwd.clone().multiplyScalar(clamp(tau, -900, 900) * dt), true);
+      this.torque(fwd.clone().multiplyScalar(clamp(tau, -900, 900) * dt), true);
     } else if (alive && grounded) {
       const wn = 11;
       const zeta = 0.95;
@@ -356,43 +395,79 @@ export class Bike {
       const h = this.comHeight;
       tau -= this.mass * h * (G * Math.sin(lean) - v * yawRateRight * Math.cos(lean)) * 0.9;
       tau = clamp(tau, -1600, 1600);
-      b.applyTorqueImpulse(fwd.clone().multiplyScalar(tau * dt), true);
+      this.torque(fwd.clone().multiplyScalar(tau * dt), true);
     } else if (alive) {
-      // in the air the rider levels the bike side to side
-      const wn = 5;
-      const tau = Iroll * (wn * wn * (this.steerInput * 0.3 - lean) - 1.6 * wn * rollRate);
-      b.applyTorqueImpulse(fwd.clone().multiplyScalar(clamp(tau, -300, 300) * dt), true);
+      // In the air: A/D whips the bike sideways (it lays over as it turns);
+      // let go and the rider brings it back in line with the direction of travel.
+      // Only real air counts: a short bounce off a bump doesn't start a whip.
+      const whip = smoothstep(0.06, 0.2, this.airTime) * this.steerInput;
+      const wn = 7;
+      const tau = Iroll * (wn * wn * (whip * 0.4 - lean) - 1.8 * wn * rollRate);
+      this.torque(fwd.clone().multiplyScalar(clamp(tau, -450, 450) * dt), true);
+      // The whip angle follows the key: hold for up to ~60 degrees, let go to
+      // straighten. It turns about the bike's own up axis so it doesn't roll it over.
+      const Iyaw = cfg.inertia[1];
+      const yawRate = av.dot(up);
+      const err = whip * 1.05 - (up.y > 0.3 ? slip : 0);
+      const yawTq = -err * Iyaw * 30 - yawRate * Iyaw * 9;
+      this.torque(up.clone().multiplyScalar(clamp(yawTq, -260, 260) * dt), true);
+    }
+
+    // On the ground the rider keeps the bike pointing where it's going, so a
+    // bump can't spin it round.
+    if (alive && both && hSpeed > 2) {
+      const expectedYaw = (-v * Math.tan(this.steer)) / L;
+      const yawErr = av.dot(worldUp) - expectedYaw;
+      const yawTq = clamp(slip * 450 - yawErr * 70, -450, 450);
+      this.torque(worldUp.clone().multiplyScalar(yawTq * dt), true);
     }
 
     // ---------- Pitch: rider weight shift ----------
     const pitchRate = av.dot(right);
     if (alive) {
-      let tq = grounded ? -pitchIn * 160 : -pitchIn * 300 - pitchRate * 10;
-      if (!grounded && this.airTime > 0.1) {
-        // landing help: gently line the bike up with the ground ahead
+      let tq = grounded ? -pitchIn * 170 : -pitchIn * 270 - pitchRate * 4;
+      if (!grounded && this.airTime > 0.1 && Math.abs(pitchIn) < 0.1) {
+        // landing help: when you're not pulling or pushing, line up with the ground ahead
         const p = this._pos;
         const ahead = 3;
         const h0 = this.world.heightAt(p.x, p.z);
         const h1 = this.world.heightAt(p.x + fwd.x * ahead, p.z + fwd.z * ahead);
         const want = Math.sin(Math.atan2(h1 - h0, ahead * Math.hypot(fwd.x, fwd.z)));
-        tq += clamp((want - fwd.y) * 260, -160, 160);
+        tq += clamp((want - fwd.y) * 300, -200, 200) - pitchRate * 8;
       }
-      b.applyTorqueImpulse(right.clone().multiplyScalar(tq * dt), true);
+      this.torque(right.clone().multiplyScalar(tq * dt), true);
     }
+
+    // ---------- Tricks ----------
+    if (!grounded) {
+      this.airPitch += pitchRate * dt;
+      if (up.y > 0.3) this.maxWhip = Math.max(this.maxWhip, Math.abs(slip));
+    } else if (wasAir > 0.3 && alive) {
+      // the rider soaks up the landing with their legs
+      this.absorb = 0.35;
+      const flips = Math.round(Math.abs(this.airPitch) / (Math.PI * 2));
+      if (flips > 0) this.trick = `${flips > 1 ? `${flips}x ` : ''}${this.airPitch > 0 ? 'Backflip' : 'Frontflip'}!`;
+      else if (this.maxWhip > 0.6) this.trick = 'Whip!';
+    }
+    if (grounded) {
+      this.airPitch = 0;
+      this.maxWhip = 0;
+    }
+    this.absorb = Math.max(0, this.absorb - dt);
 
     // ---------- Hop ----------
     if (alive) {
       if (input.hop) {
         this.hopCharge = Math.min(1, this.hopCharge + dt * 3);
         if (grounded) {
-          b.applyImpulse(up.clone().multiplyScalar(-260 * this.hopCharge * dt), true);
+          this.impulse(up.clone().multiplyScalar(-260 * this.hopCharge * dt), true);
         }
       } else if (this.hopCharge > 0) {
         if (this.groundedTime > 0.03 || this.airTime < 0.08) {
           const dv = cfg.hop * (0.45 + 0.55 * this.hopCharge);
           const dirUp = up.clone().add(worldUp).normalize();
-          b.applyImpulse(dirUp.multiplyScalar(this.mass * dv), true);
-          b.applyTorqueImpulse(right.clone().multiplyScalar(4.5 * this.hopCharge), true);
+          this.impulse(dirUp.multiplyScalar(this.mass * dv), true);
+          this.torque(right.clone().multiplyScalar(4.5 * this.hopCharge), true);
         }
         this.hopCharge = 0;
       }
@@ -420,7 +495,8 @@ export class Bike {
       // wheel touching down doesn't read as an instant jump in travel.
       const xr = w.x / w.travel;
       const xdot = clamp(-vP.dot(n), -4, 6);
-      let F = w.k * w.x * (1 + w.prog * xr * xr) + (xdot > 0 ? w.cComp : w.cReb) * xdot;
+      const comp = w.cComp * (this.absorb > 0 ? 2.5 : 1);
+      let F = w.k * w.x * (1 + w.prog * xr * xr) + (xdot > 0 ? comp : w.cReb) * xdot;
       F = Math.max(0, F);
       if (this.crashed) F = Math.min(F, this.mass * G * 3);
       w.load = F;
@@ -429,7 +505,7 @@ export class Bike {
       // push, so most of the normal's component along the axle is dropped.
       const axle = right.clone();
       if (w.front) axle.multiplyScalar(Math.cos(this.steer)).addScaledVector(fwd, -Math.sin(this.steer));
-      n.addScaledVector(axle, -0.7 * n.dot(axle)).normalize();
+      n.addScaledVector(axle, -0.92 * n.dot(axle)).normalize();
 
       let wf = fwd.clone();
       if (w.front) wf.multiplyScalar(Math.cos(this.steer)).addScaledVector(right, Math.sin(this.steer));
@@ -443,7 +519,7 @@ export class Bike {
 
       const mLat = 1 / this.invMassAt(r, wr);
       const mLong = 1 / this.invMassAt(r, wf);
-      let Flat = (-vLat * mLat * 0.45) / dt;
+      let Flat = (-vLat * mLat * 0.3) / dt;
 
       let Flong = 0;
       if (!w.front && throttle > 0 && vLong > -0.5) {
@@ -459,7 +535,8 @@ export class Bike {
       if (Math.abs(vLong) > 0.05) Flong -= Math.sign(vLong) * cfg.rollingRes * F;
 
       const mu = (w.surface ? w.surface.mu : 0.8) * cfg.grip;
-      const Fmax = mu * F;
+      // a sharp bump spikes the load for an instant; don't let that spike grab the bike sideways
+      const Fmax = mu * Math.min(F, this.mass * G * 1.1);
       const total = Math.hypot(Flat, Flong);
       w.slip = 0;
       if (total > Fmax && total > 0) {
@@ -472,7 +549,7 @@ export class Bike {
       if (w.front) frontBrakeF = Math.abs(braking);
 
       const imp = n.clone().multiplyScalar(F).addScaledVector(wf, Flong).addScaledVector(wr, Flat).multiplyScalar(dt);
-      b.applyImpulseAtPoint(imp, w.point, true);
+      this.impulseAt(imp, w.point, true);
 
       const locked = brakeMax > 0 && w.slip > 0.2 && Math.abs(braking) >= brakeMax * 0.99;
       w.spinRate = locked ? 0 : vLong / cfg.wheelR;
@@ -481,14 +558,14 @@ export class Bike {
 
     // The rider braces and shifts back under hard front braking.
     if (alive && frontBrakeF > 0) {
-      b.applyTorqueImpulse(right.clone().multiplyScalar(frontBrakeF * 0.6 * dt), true);
+      this.torque(right.clone().multiplyScalar(frontBrakeF * 0.6 * dt), true);
     }
 
     // ---------- Air drag ----------
     const sp = lv.length();
     if (sp > 0.1) {
       const drag = 0.5 * 1.2 * cfg.cdA * sp;
-      b.applyImpulse(lv.clone().multiplyScalar(-drag * dt), true);
+      this.impulse(lv.clone().multiplyScalar(-drag * dt), true);
     }
 
     // ---------- Cranks ----------
@@ -537,14 +614,15 @@ export class Bike {
     if (grounded && wasAir > 0.25) {
       const n = this.wheels[0].contact ? this.wheels[0].normal : this.wheels[1].normal;
       const ang = Math.acos(clamp(this.up.dot(n), -1, 1));
-      if (ang > 1.15) return 'Bad landing';
+      if (ang > 1.25) return 'Bad landing';
+      if (Math.abs(this.slip) > 1.25 && this.speed > 4) return 'Landed sideways';
     }
 
     // a sudden change in velocity is a huge impact (trees, casing to flat)
     this.velHistory.push(this._lv.clone());
     if (this.velHistory.length > 14) this.velHistory.shift();
     const old = this.velHistory[0];
-    if (old && old.distanceTo(this._lv) > 13) return 'Massive impact';
+    if (old && old.distanceTo(this._lv) > 17) return 'Massive impact';
     return '';
   }
 

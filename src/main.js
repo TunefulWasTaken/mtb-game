@@ -192,6 +192,13 @@ async function main() {
   function tick(ride) {
     const crash = bike.step(STEP, ride);
     physics.step();
+    // fell off the edge of the map, or the numbers blew up: put the rider back
+    const p = bike.body.translation();
+    const { x0, x1, z0, z1 } = world.bounds;
+    if (!bike.healthy() || p.x < x0 || p.x > x1 || p.z < z0 || p.z > z1 || p.y < world.heightAt(p.x, p.z) - 20) {
+      spawn(checkpoint);
+      return;
+    }
     if (crash) {
       syncVisuals(ride);
       const b = bike.body;
@@ -253,6 +260,10 @@ async function main() {
     if (steps === 8) acc = 0;
 
     syncVisuals(ride);
+    if (bike.trick) {
+      banner(bike.trick, 1.6);
+      bike.trick = '';
+    }
 
     // Progress, checkpoints and the run timer.
     const near = track.nearest(tmpPos.x, tmpPos.z);
