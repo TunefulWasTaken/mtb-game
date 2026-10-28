@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MTB Game</title>
+  <style>
+    :root {
+      --ink: #f4f1ea;
+      --ink-dim: rgba(244, 241, 234, 0.7);
+      --panel: rgba(18, 20, 18, 0.62);
+      --accent: #e8590c;
+      --danger: #e03131;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      height: 100%;
+      overflow: hidden;
+      background: #0e110d;
+      color: var(--ink);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    canvas { display: block; }
+    .hud {
+      position: fixed;
+      pointer-events: none;
+      font-variant-numeric: tabular-nums;
+    }
+    #speed {
+      right: 24px;
+      bottom: 20px;
+      text-align: right;
+      text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+    }
+    #speed .num { font-size: 56px; font-weight: 800; line-height: 1; }
+    #speed .unit { font-size: 14px; color: var(--ink-dim); letter-spacing: 0.08em; }
+    #info {
+      left: 20px;
+      top: 16px;
+      background: var(--panel);
+      padding: 10px 14px;
+      border-radius: 10px;
+      font-size: 14px;
+      line-height: 1.55;
+      min-width: 190px;
+    }
+    #info b { color: #fff; }
+    #info .row { display: flex; justify-content: space-between; gap: 16px; }
+    #info .label { color: var(--ink-dim); }
+    #help {
+      right: 20px;
+      top: 16px;
+      background: var(--panel);
+      padding: 12px 16px;
+      border-radius: 10px;
+      font-size: 13px;
+      line-height: 1.7;
+    }
+    #help kbd {
+      display: inline-block;
+      min-width: 22px;
+      padding: 0 6px;
+      margin-right: 2px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.14);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      font: 600 12px/20px system-ui, sans-serif;
+      text-align: center;
+      color: #fff;
+    }
+    #help .hint { color: var(--ink-dim); margin-top: 6px; }
+    #crash {
+      left: 50%;
+      top: 34%;
+      transform: translate(-50%, -50%);
+      text-align: center;
+      display: none;
+      text-shadow: 0 3px 14px rgba(0, 0, 0, 0.7);
+    }
+    #crash .title { font-size: 54px; font-weight: 900; color: var(--danger); letter-spacing: 0.02em; }
+    #crash .why { font-size: 20px; margin-top: 4px; }
+    #crash .respawn { font-size: 16px; margin-top: 14px; color: var(--ink-dim); }
+    #banner {
+      left: 50%;
+      top: 18%;
+      transform: translateX(-50%);
+      font-size: 34px;
+      font-weight: 800;
+      text-shadow: 0 3px 14px rgba(0, 0, 0, 0.7);
+      opacity: 0;
+      transition: opacity 0.4s;
+    }
+    #loading {
+      position: fixed;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      background: radial-gradient(circle at 50% 40%, #233021, #0e110d 70%);
+      z-index: 10;
+      text-align: center;
+      padding: 16px;
+    }
+    #loading h1 { margin: 0 0 8px; font-size: 42px; letter-spacing: 0.04em; }
+    #loading h1 span { color: var(--accent); }
+    #loading .msg { color: var(--ink-dim); font-size: 16px; min-height: 24px; }
+    #loading button {
+      margin-top: 22px;
+      padding: 12px 34px;
+      font: 700 18px system-ui, sans-serif;
+      color: #fff;
+      background: var(--accent);
+      border: 0;
+      border-radius: 999px;
+      cursor: pointer;
+      display: none;
+    }
+    #loading button:hover { filter: brightness(1.1); }
+    #fps { left: 20px; bottom: 14px; font-size: 12px; color: var(--ink-dim); }
+    @media (max-width: 700px) {
+      #help { display: none; }
+      #speed .num { font-size: 40px; }
+    }
+  </style>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/",
+        "@dimforge/rapier3d-compat": "https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.14.0/rapier.es.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="loading">
+    <div>
+      <h1>MTB <span>GAME</span></h1>
+      <div class="msg" id="loadMsg">Loading…</div>
+      <button id="startBtn">Ride</button>
+    </div>
+  </div>
+
+  <div class="hud" id="info">
+    <div class="row"><span class="label">Track</span><b id="trackName">Downhill</b></div>
+    <div class="row"><span class="label">Distance</span><b id="dist">0 m</b></div>
+    <div class="row"><span class="label">Run time</span><b id="time">–</b></div>
+    <div class="row"><span class="label">Best</span><b id="best">–</b></div>
+    <div class="row"><span class="label">Camera</span><b id="camMode">3rd person</b></div>
+  </div>
+
+  <div class="hud" id="help">
+    <div><kbd>W</kbd> pedal &nbsp; <kbd>S</kbd> brake</div>
+    <div><kbd>A</kbd><kbd>D</kbd> steer / lean</div>
+    <div><kbd>↑</kbd><kbd>↓</kbd> lean forward / back</div>
+    <div><kbd>Space</kbd> hold to crouch, release to hop</div>
+    <div><kbd>C</kbd> camera &nbsp; <kbd>R</kbd> respawn</div>
+    <div><kbd>T</kbd> back to the top &nbsp; <kbd>H</kbd> hide help</div>
+    <div class="hint">Lean back for drops and big landings.</div>
+  </div>
+
+  <div class="hud" id="speed"><div class="num" id="kmh">0</div><div class="unit">KM/H</div></div>
+  <div class="hud" id="crash">
+    <div class="title">CRASHED</div>
+    <div class="why" id="crashWhy"></div>
+    <div class="respawn">Press <b>R</b> to get back on</div>
+  </div>
+  <div class="hud" id="banner"></div>
+  <div class="hud" id="fps"></div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
