@@ -19,8 +19,8 @@ const NZ = LENGTH + 1;
 // Friction of each kind of surface.
 export const SURFACE = {
   trail: { mu: 1.0, kind: 'trail' },
-  forest: { mu: 0.72, kind: 'forest' },
-  root: { mu: 0.42, kind: 'root' },
+  forest: { mu: 0.82, kind: 'forest' },
+  root: { mu: 0.62, kind: 'root' },
   rock: { mu: 0.78, kind: 'rock' },
   wood: { mu: 0.85, kind: 'wood' },
 };

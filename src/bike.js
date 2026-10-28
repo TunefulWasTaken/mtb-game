@@ -319,7 +319,7 @@ export class Bike {
     const rollRate = av.dot(fwd);
     const yawRateRight = -av.dot(uRef);
 
-    this.steerInput += clamp(steerIn - this.steerInput, -dt * 5, dt * 5);
+    this.steerInput += clamp(steerIn - this.steerInput, -dt * 8, dt * 8);
     // the rider judges how hard to lean from the grip under the tyres
     let muRef = 0.95;
     for (const w of this.wheels) if (w.contact && w.surface) muRef = Math.min(muRef, w.surface.mu * 0.92);
@@ -349,25 +349,34 @@ export class Bike {
       tau -= this.mass * this.comHeight * G * Math.sin(lean) * 0.9;
       b.applyTorqueImpulse(fwd.clone().multiplyScalar(clamp(tau, -900, 900) * dt), true);
     } else if (alive && grounded) {
-      const wn = 8.5;
+      const wn = 11;
       const zeta = 0.95;
       let tau = Iroll * (wn * wn * (targetLean - lean) - 2 * zeta * wn * rollRate);
       // rider balance: cancel the unbalanced part of gravity vs. cornering
       const h = this.comHeight;
       tau -= this.mass * h * (G * Math.sin(lean) - v * yawRateRight * Math.cos(lean)) * 0.9;
-      tau = clamp(tau, -1100, 1100);
+      tau = clamp(tau, -1600, 1600);
       b.applyTorqueImpulse(fwd.clone().multiplyScalar(tau * dt), true);
     } else if (alive) {
-      // in the air the rider can only gently level the bike
-      const wn = 3.5;
-      const tau = Iroll * (wn * wn * (this.steerInput * 0.3 - lean) - 1.2 * wn * rollRate);
-      b.applyTorqueImpulse(fwd.clone().multiplyScalar(clamp(tau, -150, 150) * dt), true);
+      // in the air the rider levels the bike side to side
+      const wn = 5;
+      const tau = Iroll * (wn * wn * (this.steerInput * 0.3 - lean) - 1.6 * wn * rollRate);
+      b.applyTorqueImpulse(fwd.clone().multiplyScalar(clamp(tau, -300, 300) * dt), true);
     }
 
     // ---------- Pitch: rider weight shift ----------
     const pitchRate = av.dot(right);
     if (alive) {
-      const tq = grounded ? -pitchIn * 140 : -pitchIn * 230 - pitchRate * 8;
+      let tq = grounded ? -pitchIn * 160 : -pitchIn * 300 - pitchRate * 10;
+      if (!grounded && this.airTime > 0.1) {
+        // landing help: gently line the bike up with the ground ahead
+        const p = this._pos;
+        const ahead = 3;
+        const h0 = this.world.heightAt(p.x, p.z);
+        const h1 = this.world.heightAt(p.x + fwd.x * ahead, p.z + fwd.z * ahead);
+        const want = Math.sin(Math.atan2(h1 - h0, ahead * Math.hypot(fwd.x, fwd.z)));
+        tq += clamp((want - fwd.y) * 260, -160, 160);
+      }
       b.applyTorqueImpulse(right.clone().multiplyScalar(tq * dt), true);
     }
 
@@ -472,7 +481,7 @@ export class Bike {
 
     // The rider braces and shifts back under hard front braking.
     if (alive && frontBrakeF > 0) {
-      b.applyTorqueImpulse(right.clone().multiplyScalar(frontBrakeF * 0.32 * dt), true);
+      b.applyTorqueImpulse(right.clone().multiplyScalar(frontBrakeF * 0.6 * dt), true);
     }
 
     // ---------- Air drag ----------
@@ -521,21 +530,21 @@ export class Bike {
     });
     if (hit) return 'You hit the ground';
 
-    if (grounded && Math.abs(lean) > 1.2) return 'Lost the front';
+    if (grounded && Math.abs(lean) > 1.35) return 'Lost the front';
     const upDot = this.up.y;
     if (grounded && upDot < 0.15) return 'Flipped over';
 
     if (grounded && wasAir > 0.25) {
       const n = this.wheels[0].contact ? this.wheels[0].normal : this.wheels[1].normal;
       const ang = Math.acos(clamp(this.up.dot(n), -1, 1));
-      if (ang > 0.85) return 'Bad landing';
+      if (ang > 1.15) return 'Bad landing';
     }
 
     // a sudden change in velocity is a huge impact (trees, casing to flat)
     this.velHistory.push(this._lv.clone());
     if (this.velHistory.length > 14) this.velHistory.shift();
     const old = this.velHistory[0];
-    if (old && old.distanceTo(this._lv) > 8.5) return 'Massive impact';
+    if (old && old.distanceTo(this._lv) > 13) return 'Massive impact';
     return '';
   }
 
