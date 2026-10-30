@@ -31,4 +31,48 @@ export const DOWNHILL = {
   ],
 };
 
-export const TRACKS = [DOWNHILL];
+// A flowing jump line: a long run of tabletops and a few gaps, with berms in
+// between. Sizes build up as you go down.
+const JUMP_SIZES = {
+  small: { lipLen: 4.5, lipH: 1.7, top: 5, land: 8.5 },
+  medium: { lipLen: 5, lipH: 2.2, top: 6.5, land: 10 },
+  large: { lipLen: 5.5, lipH: 2.7, top: 8, land: 11.5 },
+};
+const JUMP_ORDER = [
+  'small', 'small', 'medium', 'small', 'medium', 'medium', 'large', 'medium',
+  'medium', 'large', 'gap', 'medium', 'large', 'large', 'gap', 'medium',
+  'large', 'large', 'gap', 'large', 'medium', 'large', 'gap', 'large', 'large',
+];
+
+function jumpLine() {
+  const features = [];
+  let s = 48;
+  for (const kind of JUMP_ORDER) {
+    if (kind === 'gap') {
+      features.push({ type: 'gap', at: s, lipLen: 5, lipH: 2.2, gap: 5, depth: 0.8, land: 10 });
+      s += 5 + 5 + 10 + 22;
+    } else {
+      const j = JUMP_SIZES[kind];
+      features.push({ type: 'table', at: s, ...j });
+      s += j.top + j.land + 22 + j.lipLen;
+    }
+  }
+  return features;
+}
+
+export const JUMPLINE = {
+  id: 'jumpline',
+  name: 'Jump Line',
+  halfWidth: 2.3,
+  seed: 777,
+  maxGrade: 0.2,
+  minGrade: 0.11,
+  points: [
+    [105, -505], [112, -450], [102, -390], [116, -330], [104, -270], [94, -210],
+    [108, -150], [120, -90], [106, -30], [94, 30], [108, 90], [120, 150],
+    [106, 210], [96, 270], [110, 330], [118, 390], [104, 450], [108, 490],
+  ],
+  features: jumpLine(),
+};
+
+export const TRACKS = [JUMPLINE, DOWNHILL];

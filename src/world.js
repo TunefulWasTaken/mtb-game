@@ -90,9 +90,31 @@ export class Track {
     let y = new Float32Array(n);
     for (let i = 0; i < n; i++) y[i] = natural(this.px[i], this.pz[i]);
     y = boxSmooth(boxSmooth(y, 18), 18);
+    // Optionally guarantee a minimum downhill grade (keeps a jump line flowing):
+    // the closest profile that always drops at least minGrade (pool-adjacent-violators).
+    if (def.minGrade) {
+      const g = def.minGrade * this.ds;
+      const val = [];
+      const cnt = [];
+      for (let i = 0; i < n; i++) {
+        val.push(y[i] + g * i);
+        cnt.push(1);
+        while (val.length > 1 && val[val.length - 1] > val[val.length - 2]) {
+          const c1 = cnt.pop();
+          const v1 = val.pop();
+          const top = val.length - 1;
+          val[top] = (val[top] * cnt[top] + v1 * c1) / (cnt[top] + c1);
+          cnt[top] += c1;
+        }
+      }
+      let i = 0;
+      for (let b = 0; b < val.length; b++) {
+        for (let k = 0; k < cnt[b]; k++, i++) y[i] = val[b] - g * i;
+      }
+    }
     // Spread out pitches that are too steep (or uphill) over their neighbours.
     const maxDown = (def.maxGrade ?? 0.32) * this.ds;
-    const maxUp = 0.06 * this.ds;
+    const maxUp = -(def.minGrade ?? -0.06) * this.ds;
     for (let it = 0; it < 400; it++) {
       let changed = false;
       for (let i = 0; i < n - 1; i++) {
@@ -153,6 +175,21 @@ export class Track {
           } else if (s >= f.at + 0.6 && s < f.at + 0.6 + land) {
             const t = (s - f.at - 0.6) / land;
             off += f.h * 0.5 * (1 - t) * (1 - t * 0.3);
+          }
+        } else if (f.type === 'gap') {
+          // lip, a trench you have to clear, then a landing knoll
+          const a = f.at - f.lipLen;
+          const face = f.at + f.gap - 0.8;
+          const peak = f.lipH * 0.85;
+          if (s >= a && s < f.at) {
+            off += f.lipH * Math.pow((s - a) / f.lipLen, 1.5);
+          } else if (s >= f.at && s < face) {
+            off -= f.depth * Math.sin((Math.PI * (s - f.at)) / (face - f.at));
+          } else if (s >= face && s < f.at + f.gap) {
+            off += peak * smoothstep(face, f.at + f.gap, s);
+          } else if (s >= f.at + f.gap && s < f.at + f.gap + f.land) {
+            const t = (s - f.at - f.gap) / f.land;
+            off += peak * 0.5 * (1 + Math.cos(Math.PI * t));
           }
         }
       }
@@ -398,6 +435,7 @@ export class World {
     const cDirt = new THREE.Color(0x8a6440);
     const cDirtDark = new THREE.Color(0x5c3f27);
     const cRock = new THREE.Color(0x7c776d);
+    const cPacked = new THREE.Color(0xb48a5c);
     const floor = new THREE.Color();
     const dirt = new THREE.Color();
     for (let gz = 0; gz < NZ; gz++) {
@@ -425,6 +463,12 @@ export class World {
           dirtAmt *= 0.85 + 0.15 * this.noise(x * 1.3, z * 1.3);
         }
         dirt.copy(cDirt).lerp(cDirtDark, 0.5 + 0.5 * this.noise3(x * 0.9, z * 0.9));
+        if (i >= 0) {
+          // built jumps are lighter packed dirt; gap trenches are darker
+          const f = this.tracks[this.trailTrk[k]].feat[i];
+          dirt.lerp(cPacked, smoothstep(0.1, 0.9, f) * 0.8);
+          if (f < -0.1) dirt.multiplyScalar(0.72);
+        }
         floor.lerp(dirt, clamp(dirtAmt, 0, 1));
         col[k * 3] = floor.r;
         col[k * 3 + 1] = floor.g;

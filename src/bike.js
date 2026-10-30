@@ -400,7 +400,10 @@ export class Bike {
       // In the air: A/D whips the bike sideways (it lays over as it turns);
       // let go and the rider brings it back in line with the direction of travel.
       // Only real air counts: a short bounce off a bump doesn't start a whip.
-      const whip = smoothstep(0.06, 0.2, this.airTime) * this.steerInput;
+      let whip = smoothstep(0.06, 0.2, this.airTime) * this.steerInput;
+      // coming down close to the ground, the rider starts bringing it back
+      const clearance = this._pos.y - this.world.heightAt(this._pos.x, this._pos.z) - 0.4;
+      if (lv.y < 0) whip *= smoothstep(0.15, 1.1, clearance);
       const wn = 7;
       const tau = Iroll * (wn * wn * (whip * 0.4 - lean) - 1.8 * wn * rollRate);
       this.torque(fwd.clone().multiplyScalar(clamp(tau, -450, 450) * dt), true);
@@ -418,7 +421,9 @@ export class Bike {
     if (alive && both && hSpeed > 2) {
       const expectedYaw = (-v * Math.tan(this.steer)) / L;
       const yawErr = av.dot(worldUp) - expectedYaw;
-      const yawTq = clamp(slip * 450 - yawErr * 70, -450, 450);
+      // just after landing the rider snaps the bike straight much harder
+      const k = this.absorb > 0 ? 1300 : 450;
+      const yawTq = clamp(slip * k - yawErr * 70, -k, k);
       this.torque(worldUp.clone().multiplyScalar(yawTq * dt), true);
     }
 

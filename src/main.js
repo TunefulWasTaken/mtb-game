@@ -97,12 +97,21 @@ async function main() {
   const input = new Input();
   const rig = new CameraRig(camera, world);
 
-  const track = world.tracks[0];
+  let track = world.tracks[0];
   $('trackName').textContent = track.def.name;
   let checkpoint = 3;
   let runStart = -1;
   let runTime = 0;
+  const bests = new Map();
   let best = null;
+
+  function chooseTrack(t) {
+    track = t;
+    $('trackName').textContent = t.def.name;
+    best = bests.get(t.def.id) ?? null;
+    checkpoint = 3;
+    spawn(checkpoint);
+  }
   let clockTime = 0;
   let crashTime = 0;
   let showHelp = true;
@@ -147,18 +156,24 @@ async function main() {
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
 
-  $('loadMsg').textContent = 'Ready. Ride carefully: the physics is not forgiving.';
-  const btn = $('startBtn');
-  btn.style.display = 'inline-block';
+  $('loadMsg').textContent = 'Pick a trail';
+  const picker = $('trackPicker');
   await new Promise((resolve) => {
-    const go = () => {
+    const go = (t) => {
       window.removeEventListener('keydown', onKey);
+      if (t !== track) chooseTrack(t);
       resolve();
     };
     const onKey = (e) => {
-      if (e.code === 'Enter' || e.code === 'Space') go();
+      if (e.code === 'Enter' || e.code === 'Space') go(track);
     };
-    btn.addEventListener('click', go, { once: true });
+    for (const t of world.tracks) {
+      const b = document.createElement('button');
+      b.textContent = t.def.name;
+      b.addEventListener('click', () => go(t), { once: true });
+      picker.appendChild(b);
+    }
+    picker.style.display = 'flex';
     window.addEventListener('keydown', onKey);
   });
   $('loading').style.display = 'none';
@@ -217,7 +232,10 @@ async function main() {
 
   // Handy for poking at the game from the browser console: game.sim(2, { throttle: 1 })
   window.game = {
-    bike, rider, world, track, physics, rig, spawn, renderer,
+    bike, rider, world, physics, rig, spawn, renderer, chooseTrack,
+    get track() {
+      return track;
+    },
     sim(seconds, ride = {}) {
       const r = { throttle: 0, brake: 0, steer: 0, pitch: 0, hop: false, ...ride };
       for (let i = 0; i < Math.round(seconds / STEP); i++) tick(r);
@@ -243,6 +261,11 @@ async function main() {
     if (input.took('KeyT')) {
       checkpoint = 3;
       spawn(checkpoint);
+    }
+    if (input.took('KeyN')) {
+      const next = world.tracks[(world.tracks.indexOf(track) + 1) % world.tracks.length];
+      chooseTrack(next);
+      banner(next.def.name);
     }
     if (input.took('KeyH')) {
       showHelp = !showHelp;
@@ -275,7 +298,10 @@ async function main() {
       if (runStart >= 0 && near.s > track.length - 8) {
         const final = clockTime - runStart;
         const isBest = best === null || final < best;
-        if (isBest) best = final;
+        if (isBest) {
+          best = final;
+          bests.set(track.def.id, final);
+        }
         banner(`Finished in ${formatTime(final)}${isBest ? ' (best!)' : ''}`, 4);
         runStart = -1;
         runTime = final;

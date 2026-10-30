@@ -45,13 +45,8 @@ export function ride(seconds, vKmh, { every = 1, look = 9, gain = 2.2, lean = 0 
     for (const f of tr.def.features) {
       if (f.type === 'drop' && n.s > f.at - 2.5 && n.s < f.at + 0.5) pitch = -0.8;
     }
-    if (airborne) {
-      const k = tr.indexAt(n.s + 3);
-      const slope = (tr.py[k] - tr.py[n.i]) / 3;
-      const want = Math.sin(Math.atan(slope));
-      // pitch > 0 leans forward (nose down)
-      pitch = Math.max(-1, Math.min(1, (b.fwd.y - want) * 6));
-    }
+    // in the air, let go and let the game's landing help level the bike
+    if (airborne) pitch = 0;
     game().sim(1 / 120, {
       throttle: v < vKmh - 5 ? 1 : 0,
       brake: v > vKmh + 3 && b.wheels[0].contact && b.wheels[1].contact ? 1 : 0,
@@ -146,11 +141,11 @@ export async function planeTest(seconds = 6, grade = 0.2, ride = {}) {
 export async function start() {
   await new Promise((r) => {
     const i = setInterval(() => {
-      const btn = document.getElementById('startBtn');
+      const btn = document.querySelector('#trackPicker button');
       if (window.game) {
         clearInterval(i);
         r();
-      } else if (btn && btn.style.display === 'inline-block') {
+      } else if (btn) {
         btn.click();
       }
     }, 100);
