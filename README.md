@@ -6,7 +6,9 @@ Working title. See [DESIGN.md](DESIGN.md) for the plan and ideas.
 
 ## Play it
 
-You need [Node.js](https://nodejs.org) installed. From this folder run:
+**Play in your browser: https://tunefulwastaken.github.io/mtb-game/**
+
+To run it on your own computer instead, you need [Node.js](https://nodejs.org). From this folder run:
 
 ```bash
 node serve.js
@@ -26,6 +28,7 @@ Then open <http://localhost:5173> in your browser.
 | C | Switch between 3rd-person and 1st-person camera |
 | R | Respawn at the last checkpoint |
 | T | Back to the top |
+| N | Switch to the next trail |
 | H | Hide the controls panel |
 
 Tips: let go of the keys before you land and the rider lines the bike up with the ground.
@@ -33,7 +36,9 @@ Don't grab the front brake with a wheel in the air, and roots are slippery.
 
 ## What's in it
 
-- A forest mountain with a 1.2 km downhill track: berms, root sections, rock gardens, drops and tabletop jumps
+- A forest mountain with two trails:
+  - **Jump Line**: 25 tabletops and gap jumps, built for whips and flips
+  - **Downhill**: 1.2 km with berms, root sections, rock gardens, drops and tabletop jumps
 - A detailed downhill bike: dual-crown fork, coil shock and linkage, spoked wheels with knobby tyres,
   disc brakes, drivetrain and cockpit, all moving with the suspension and steering
 - A rider who stays on the grips and pedals, and ragdolls off the bike in a crash
