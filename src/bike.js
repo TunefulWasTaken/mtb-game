@@ -11,6 +11,8 @@ const V3 = THREE.Vector3;
 const G = 9.81;
 const IDENT = { x: 0, y: 0, z: 0, w: 1 };
 const QUERY_GROUPS = groups(GROUP_BIKE, GROUP_WORLD);
+// how long (s) the rider spends soaking up a landing
+const ABSORB_TIME = 0.45;
 // Ray angles (radians, around the wheel axle) used to trace the wheel's rim.
 const FAN = [];
 for (let a = -70; a <= 70; a += 7) FAN.push((a * Math.PI) / 180);
@@ -100,11 +102,12 @@ export class Bike {
     );
     for (const w of this.wheels) {
       physics.createCollider(
+        // bump stops: slippery so a bottomed-out landing doesn't grab the ground
         R.ColliderDesc.ball(cfg.wheelR * 0.9)
           .setTranslation(w.hubTop.x, w.hubTop.y, w.hubTop.z)
           .setDensity(0)
-          .setFriction(0.6)
-          .setRestitution(0.05)
+          .setFriction(0.05)
+          .setRestitution(0)
           .setCollisionGroups(solid),
         body,
       );
@@ -447,9 +450,11 @@ export class Bike {
     if (!grounded) {
       this.airPitch += pitchRate * dt;
       if (up.y > 0.3) this.maxWhip = Math.max(this.maxWhip, Math.abs(slip));
-    } else if (wasAir > 0.3 && alive) {
+    } else if (wasAir > 0.15 && alive) {
       // the rider soaks up the landing with their legs
-      this.absorb = 0.35;
+      this.absorb = ABSORB_TIME;
+    }
+    if (grounded && wasAir > 0.3 && alive) {
       const flips = Math.round(Math.abs(this.airPitch) / (Math.PI * 2));
       if (flips > 0) this.trick = `${flips > 1 ? `${flips}x ` : ''}${this.airPitch > 0 ? 'Backflip' : 'Frontflip'}!`;
       else if (this.maxWhip > 0.6) this.trick = 'Whip!';
@@ -477,7 +482,10 @@ export class Bike {
         this.hopCharge = 0;
       }
     }
-    this.crouch = lerp(this.crouch, input.hop && alive ? this.hopCharge : 0, Math.min(1, dt * 12));
+    // the rider crouches to hop, and sinks into landings
+    const landCrouch = (this.absorb / ABSORB_TIME) * 0.9;
+    const crouchTarget = alive ? Math.max(input.hop ? this.hopCharge : 0, landCrouch) : 0;
+    this.crouch = lerp(this.crouch, crouchTarget, Math.min(1, dt * 12));
 
     // ---------- Wheels: suspension, tyres, brakes, pedalling ----------
     for (const w of this.wheels) {
@@ -500,9 +508,22 @@ export class Bike {
       // wheel touching down doesn't read as an instant jump in travel.
       const xr = w.x / w.travel;
       const xdot = clamp(-vP.dot(n), -4, 6);
-      const comp = w.cComp * (this.absorb > 0 ? 2.5 : 1);
-      let F = w.k * w.x * (1 + w.prog * xr * xr) + (xdot > 0 ? comp : w.cReb) * xdot;
-      F = Math.max(0, F);
+      // during a landing the damping is much heavier, so the bike settles instead of springing back
+      const landing = this.absorb > 0;
+      const comp = w.cComp * (landing ? 2.6 : 1);
+      const reb = w.cReb * (landing ? 2.5 : 1);
+      const spring = w.k * w.x * (1 + w.prog * xr * xr);
+      let damp = (xdot > 0 ? comp : reb) * xdot;
+      // Bottom-out bumper in the last 20% of travel. It only pushes back while
+      // compressing, so it soaks up a big hit without throwing the bike back up.
+      const deep = Math.max(0, xr - 0.8) / 0.2;
+      if (xdot > 0) damp += w.k * w.travel * 3 * deep * deep + comp * 2 * deep * xdot;
+      // A damper can at most stop the wheel's motion in one step, never reverse
+      // it: past that it would kick the bike back into the air.
+      const mN = 1 / this.invMassAt(r, n);
+      const dampMax = (mN * Math.abs(xdot)) / dt;
+      damp = clamp(damp, -dampMax, dampMax);
+      let F = Math.max(0, spring + damp);
       if (this.crashed) F = Math.min(F, this.mass * G * 3);
       w.load = F;
 
@@ -564,6 +585,17 @@ export class Bike {
     // The rider braces and shifts back under hard front braking.
     if (alive && frontBrakeF > 0) {
       this.torque(right.clone().multiplyScalar(frontBrakeF * 0.6 * dt), true);
+    }
+
+    // The rider's legs keep the bike planted after a landing: any rebound
+    // away from the ground is soaked up rather than sending the bike back up.
+    if (alive && this.absorb > 0 && grounded) {
+      const w = this.wheels[0].contact ? this.wheels[0] : this.wheels[1];
+      const away = lv.dot(w.normal);
+      if (away > 0) {
+        const fade = this.absorb / ABSORB_TIME;
+        this.impulse(w.normal.clone().multiplyScalar(-away * this.mass * 0.25 * fade));
+      }
     }
 
     // ---------- Air drag ----------

@@ -99,6 +99,44 @@ export function trace(sFrom, sTo, vKmh, { every = 5, lean = 0 } = {}) {
   return rows.join('\n');
 }
 
+// Ride the current trail and report how each landing behaves: whether the bike
+// bounces back into the air, and how far it rises off the ground afterwards.
+export function landings(vKmh, seconds = 40) {
+  const { bike: b, track: tr, world } = game();
+  const out = [];
+  let air = 0;
+  let after = -1;
+  let rec = null;
+  for (let i = 0; i < seconds * 120; i++) {
+    const both = !b.wheels[0].contact && !b.wheels[1].contact;
+    ride(1 / 120, vKmh, { every: 1e9, look: 14, gain: 1.5 });
+    if (b.crashed) {
+      out.push(`CRASH ${b.crashReason}`);
+      break;
+    }
+    const t = b.body.translation();
+    const h = t.y - world.heightAt(t.x, t.z);
+    if (both) air += 1 / 120;
+    if (!both && air > 0.35) {
+      rec = { s: Math.round(tr.nearest(t.x, t.z).s), air: air.toFixed(2), bounces: 0, rise: 0, h0: h, wasAir: false, maxX: 0 };
+      after = 0;
+    }
+    if (!both) air = 0;
+    if (after >= 0) {
+      after += 1 / 120;
+      rec.rise = Math.max(rec.rise, h - rec.h0);
+      rec.maxX = Math.max(rec.maxX, b.wheels[0].x, b.wheels[1].x);
+      if (both && !rec.wasAir) rec.bounces++;
+      rec.wasAir = both;
+      if (after > 0.8) {
+        out.push(`s${rec.s} air${rec.air}s bounces ${rec.bounces} rise ${(rec.rise * 100).toFixed(0)}cm travel ${(rec.maxX * 100).toFixed(0)}cm`);
+        after = -1;
+      }
+    }
+  }
+  return out.join('\n');
+}
+
 // Coast down a perfectly smooth test slope far from the map and report wheel loads.
 export async function planeTest(seconds = 6, grade = 0.2, ride = {}) {
   const RAPIER = (await import('@dimforge/rapier3d-compat')).default;
